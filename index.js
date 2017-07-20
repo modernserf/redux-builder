@@ -1,7 +1,5 @@
-const nullUpdater = {
-    push: () => {
-        throw new Error("Updater functions (.set, .update) can only be called in handlers")
-    }
+function nullUpdater () {
+    throw new Error("Updater functions (.set, .update) can only be called in handlers")
 }
 
 const ACTION_TYPE = "__redux_builder"
@@ -12,25 +10,36 @@ class Handler {
         this._after = []
         this._namespace = []
         this._matchers = []
-        this._updaters = nullUpdater
+        this._updater = nullUpdater
         builder(this)
     }
 
     // pattern helpers (return value, not fluent)
-    // handle nullable value
     optional (matcher) {
-        return (value) => value === null || value === undefined || match(matcher, value)
+        return (value, state) => value === null || value === undefined || match(matcher, value, state)
     }
-    // TODO: oneOf, oneOfType, arrayOf, shape, etc.
+    oneOf (...matchers) {
+        return (value, state) => matchers.some((matcher) => match(matcher, value, state))
+    }
+    arrayOf (matcher) {
+        return (arr, state) => Array.isArray(arr) && arr.every((value) => match(matcher, value, state))
+    }
+    objectOf (matcher) {
+        return (obj, state) => obj && Object.values(obj).every((value) => match(matcher, value, state))
+    }
 
     // state updating functions
     // TODO: batch sets into a single operation
     set (key, value) {
-        this._updaters.push((state) => Object.assign({}, state, { [key]: value }))
+        this._updater((state) => Object.assign({}, state, { [key]: value(state) }))
+        return this
+    }
+    merge (mapper, ...args) {
+        this._updater((state) => Object.assign({}, state, mapper(state, ...args)))
         return this
     }
     update (reducer) {
-        this._updaters.push(reducer)
+        this._updater(reducer)
         return this
     }
 
@@ -51,7 +60,7 @@ class Handler {
             pattern,
             handlers: [
                 ...this._before,
-                (state, action) => updater(state, ...this._spreadArguments(pattern, action)),
+                (action) => updater(...this._spreadArguments(pattern, action)),
                 ...this._after
             ]
         })
@@ -59,7 +68,7 @@ class Handler {
     }
     setter (...setters) {
         for (const key of setters) {
-            this.on(key, undefined, (state, value) => this.set(key, value))
+            this.on(key, undefined, (value) => this.set(key, () => value))
         }
         return this
     }
@@ -74,9 +83,8 @@ class Handler {
 
     // helpers
     _mapHookUpdaters (updaters) {
-        return updaters.map((u) => (state, action) => u(this, state, action))
+        return updaters.map((u) => () => u(this))
     }
-
     _spreadArguments (pattern, action) {
         // made by redux builder middleware
         if (action.type === ACTION_TYPE) {
@@ -86,36 +94,33 @@ class Handler {
             return [action]
         }
     }
-    _matchPattern (pattern, action) {
+    _matchPattern (pattern, action, state) {
         // made by redux builder middleware
         if (action.type === ACTION_TYPE) {
-            for (let i = 0; i < pattern.length; i++) {
-                if (!match(pattern[i], action.payload[i])) {
-                    return false
-                }
-            }
-            return true
+            return pattern.every((matcher, i) => match(matcher, action.payload[i], state))
         // "regular" action with type field
+        } else if (pattern.length === 2) {
+            return pattern[0] === action.type && match(pattern[1], action, state)
+        // regular action without payload
+        } else if (pattern.length === 1) {
+            return pattern[0] === action.type
         } else {
-            return pattern.length === 2 &&
-                match(pattern[0], action.type) &&
-                match(pattern[1], action)
+            return false
         }
     }
 
     run (state, action) {
-        this._updaters = []
         let nextState = state
+        this._updater = (fn) => { nextState = fn(nextState, action) }
+
         for (const matcher of this._matchers) {
-            if (this._matchPattern(matcher.pattern, action)) {
-                // run handlers (populates this._updaters)
-                for (const handler of matcher.handlers) { handler(state, action) }
-                // run reducers in this._updaters
-                nextState = this._updaters.reduce((s, reducer) => reducer(s, action), nextState)
+            if (this._matchPattern(matcher.pattern, action, state)) {
+                for (const handler of matcher.handlers) { handler(action) }
+                break
             }
         }
-        this._updaters = nullUpdater
 
+        this._updater = nullUpdater
         return nextState
     }
 }
@@ -141,7 +146,7 @@ function isInstanceOf (value, constructor) {
     }
 }
 
-function match (matcher, value) {
+function match (matcher, value, state) {
     // match anything except a null-ish value
     if (matcher === undefined || matcher === null) {
         return (value !== null && value !== undefined)
@@ -156,29 +161,15 @@ function match (matcher, value) {
         return matcher === value
 
     case "function":
-        return isInstanceOf(value, matcher) || matcher(value) === true
+        return isInstanceOf(value, matcher) || matcher(value, state) === true
 
-    // TODO: should these be "raw" or handled by t.arrayOf, t.shape etc helpers?
     case "object":
         if (!value) { return false }
 
-        // match arrays (recursive shape)
-        // pattern [Number] matches [1], [1,2,3], [1,2,3,4,5...]
-        // pattern [Number, String] matches [1, "foo"], [1, "foo", 2, "bar"...]
-        if (Array.isArray(matcher)) {
-            if (!Array.isArray(value) || matcher.length > value.length) { return false }
-
-            for (let i = 0; i < value.length; i++) {
-                if (!match(matcher[i % matcher.length], value[i])) {
-                    return false
-                }
-            }
-            return true
-        }
         // match object (value is superset of pattern)
         for (const key in matcher) {
             if (!value.hasOwnProperty(key)) { return false }
-            if (!match(matcher[key], value[key])) { return false }
+            if (!match(matcher[key], value[key], state)) { return false }
         }
         return true
     default:
@@ -197,6 +188,17 @@ function mapAction (...action) {
         payload: action
     }
 }
+
+// TODO: builder middleware API
+// createMiddleware((t) => t
+// .namespace("counter")
+// .on("foo", __, "bar", __, (state, fooArg, barArg) => t
+// .continue() // pass action unaltered
+// .next("foo", fooArg, "bar", barArg, "withFlag", "flag"))
+// .dispatch("foo", 3, "bar", 4)
+// .dispatchRaw({ type: "foo" })
+// )
+// )
 
 function createBuilderMiddleware () {
     return (store) => (next) => (action) => {

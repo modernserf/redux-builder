@@ -19,7 +19,7 @@ const videoReducer = createHandler(initState, (t) => t
     .on("period", __, (_, id) => t
         .set("periodID", id))
     .on("period", __, "withRange", __, (_, id, range) => t
-        .update(() => normalizeCustomDateRange(range))
+        .merge(normalizeCustomDateRange, range)
         .set("periodID", id))
 
     .on("sort", __, ({ field, direction }, f) => t
