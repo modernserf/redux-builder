@@ -7,31 +7,41 @@ const nullUpdater = {
 const ACTION_TYPE = "__redux_builder"
 
 class Handler {
-    constructor (build) {
+    constructor (builder) {
         this._before = []
         this._after = []
         this._namespace = []
-        // TODO: replace list with object map
         this._matchers = []
         this._updaters = nullUpdater
-        build(this)
+        builder(this)
     }
 
-    // state updating functions
-    // TODO: batch sets into a single operation
-    // TODO: _updaters is undefined except during run cycle
-    set (key, value) {
-        this._updaters.push((state) => ({ ...state, [key]: value }))
-    }
-    update (reducer) {
-        this._updaters.push(reducer)
-    }
-    // pattern helpers
+    // pattern helpers (return value, not fluent)
     // handle nullable value
     optional (matcher) {
         return (value) => value === null || value === undefined || match(matcher, value)
     }
     // TODO: oneOf, oneOfType, arrayOf, shape, etc.
+
+    // state updating functions
+    // TODO: batch sets into a single operation
+    set (key, value) {
+        this._updaters.push((state) => Object.assign({}, state, { [key]: value }))
+        return this
+    }
+    update (reducer) {
+        this._updaters.push(reducer)
+        return this
+    }
+
+    namespace (...args) {
+        if (args.length === 1 && typeof args === "function") {
+            this._namespace = args[0](this._namespace)
+        } else {
+            this._namespace = this._namespace.concat(args)
+        }
+        return this
+    }
 
     // handlers
     on (...args) {
@@ -45,17 +55,21 @@ class Handler {
                 ...this._after
             ]
         })
+        return this
     }
     setter (...setters) {
         for (const key of setters) {
             this.on(key, undefined, (state, value) => this.set(key, value))
         }
+        return this
     }
     beforeEach (...updaters) {
         this._before = this._before.concat(this._mapHookUpdaters(updaters))
+        return this
     }
     afterEach (...updaters) {
         this._after = this._after.concat(this._mapHookUpdaters(updaters))
+        return this
     }
 
     // helpers
@@ -94,8 +108,10 @@ class Handler {
         let nextState = state
         for (const matcher of this._matchers) {
             if (this._matchPattern(matcher.pattern, action)) {
-                nextState = matcher.handlers.reduce((s, handler) => handler(s, action), nextState)
-                break
+                // run handlers (populates this._updaters)
+                for (const handler of matcher.handlers) { handler(state, action) }
+                // run reducers in this._updaters
+                nextState = this._updaters.reduce((s, reducer) => reducer(s, action), nextState)
             }
         }
         this._updaters = nullUpdater
@@ -106,6 +122,23 @@ class Handler {
 
 function isConstant (value) {
     return ["string", "number", "boolean", "symbol"].indexOf(typeof value) !== -1
+}
+
+function isInstanceOf (value, constructor) {
+    switch (constructor) {
+    case Number:
+        return typeof value === "number"
+    case String:
+        return typeof value === "string"
+    case Boolean:
+        return typeof value === "boolean"
+    case Symbol:
+        return typeof value === "symbol"
+    case Array:
+        return Array.isArray(value)
+    default:
+        return value instanceof constructor
+    }
 }
 
 function match (matcher, value) {
@@ -123,7 +156,7 @@ function match (matcher, value) {
         return matcher === value
 
     case "function":
-        return (value instanceof matcher) || matcher(value)
+        return isInstanceOf(value, matcher) || matcher(value) === true
 
     // TODO: should these be "raw" or handled by t.arrayOf, t.shape etc helpers?
     case "object":
@@ -153,12 +186,12 @@ function match (matcher, value) {
     }
 }
 
-function createHandler (cb) {
+function createHandler (initState, cb) {
     const handler = new Handler(cb)
-    return (state, action) => handler.run(state, action)
+    return (state = initState, action) => handler.run(state, action)
 }
 
-function mapAction (action) {
+function mapAction (...action) {
     return {
         type: ACTION_TYPE,
         payload: action
@@ -168,7 +201,10 @@ function mapAction (action) {
 function createBuilderMiddleware () {
     return (store) => (next) => (action) => {
         if (Array.isArray(action)) {
-            return next(mapAction(action))
+            return next({
+                type: ACTION_TYPE,
+                payload: action
+            })
         } else {
             return next(action)
         }
