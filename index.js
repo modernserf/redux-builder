@@ -1,13 +1,12 @@
 const ACTION_TYPE = "__redux_builder"
 
-class Handler {
-    constructor (builder) {
+class Base {
+    constructor () {
         this._before = []
         this._after = []
         this._namespace = []
         this._matchers = []
         this._updater = nullUpdater
-        builder(this)
     }
 
     // pattern helpers (return value, not fluent)
@@ -22,27 +21,6 @@ class Handler {
     }
     objectOf (matcher) {
         return (obj, state) => obj && Object.values(obj).every((value) => match(matcher, value, state))
-    }
-
-    // state updating functions
-    // TODO: batch sets into a single operation
-    set (key, value) {
-        this._updater((state) => Object.assign({}, state, { [key]: value(state) }))
-        return this
-    }
-    merge (mapper, ...args) {
-        this._updater((state) => Object.assign({}, state, mapper(state, ...args)))
-        return this
-    }
-    update (reducer) {
-        this._updater(reducer)
-        return this
-    }
-
-    initState (state) {
-        if (this._initState) { throw new Error(".initState can only be called once per handler") }
-        this._initState = state
-        return this
     }
 
     namespace (...args) {
@@ -66,12 +44,6 @@ class Handler {
                 ...this._after
             ]
         })
-        return this
-    }
-    setter (...setters) {
-        for (const key of setters) {
-            this.on(key, undefined, (value) => this.set(key, () => value))
-        }
         return this
     }
     beforeEach (...updaters) {
@@ -115,6 +87,40 @@ class Handler {
             return false
         }
     }
+}
+
+class Handler extends Base {
+    constructor (builder) {
+        super()
+        builder(this)
+    }
+    // state updating functions
+    // TODO: batch sets into a single operation
+    set (key, value) {
+        this._updater((state) => Object.assign({}, state, { [key]: value(state) }))
+        return this
+    }
+    merge (mapper, ...args) {
+        this._updater((state) => Object.assign({}, state, mapper(state, ...args)))
+        return this
+    }
+    update (reducer) {
+        this._updater(reducer)
+        return this
+    }
+    initState (state) {
+        if (this._initState) { throw new Error(".initState can only be called once per handler") }
+        this._initState = state
+        return this
+    }
+
+    // handlers
+    setter (...setters) {
+        for (const key of setters) {
+            this.on(key, undefined, (value) => this.set(key, () => value))
+        }
+        return this
+    }
 
     run (state = this._initState, action) {
         let nextState = state
@@ -132,6 +138,68 @@ class Handler {
 
         this._updater = nullUpdater
         return nextState
+    }
+}
+
+// TODO: builder middleware API
+// createMiddleware((t) => t
+// .namespace("counter")
+// .on("foo", __, "bar", __, (state, fooArg, barArg) => t
+// .continue() // pass action unaltered
+// .next("foo", fooArg, "bar", barArg, "withFlag", "flag"))
+// .dispatch("foo", 3, "bar", 4)
+// .dispatchRaw({ type: "foo" })
+// )
+// )
+
+class Middleware extends Base {
+    constructor (builder) {
+        super()
+        builder(this)
+    }
+
+    // pass action unaltered
+    continue () {
+        this._updater((_, next, action) => next(action))
+        return this
+    }
+    // pass action
+    next (...values) {
+        this._updater((_, next) => next(mapAction(values)))
+        return this
+    }
+    // pass plain action
+    nextRaw (action) {
+        this._updater((_, next) => next(action))
+        return this
+    }
+
+    dispatch (...values) {
+        this._updater((store) => store.dispatch(mapAction(...values)))
+        return this
+    }
+    dispatchRaw (action) {
+        this._updater((store) => store.dispatch(action))
+        return this
+    }
+
+    run (store, next, action) {
+        let nextAction = action
+        this._updater = (fn) => { nextAction = fn(store, next, nextAction) }
+
+        let handled = false
+        const state = store.getState()
+        for (const matcher of this._matchers) {
+            if (this._matchPattern(matcher.pattern, action, state)) {
+                for (const handler of matcher.handlers) { handler(action) }
+                handled = true
+                break
+            }
+        }
+        if (!handled) { next(action) }
+
+        this._updater = nullUpdater
+        return nextAction
     }
 }
 
@@ -192,6 +260,11 @@ function createHandler (cb) {
     return (state, action) => handler.run(state, action)
 }
 
+function createMiddleware (cb) {
+    const middleware = new Middleware(cb)
+    return (store) => (next) => (action) => middleware.run(store, next, action)
+}
+
 function mapAction (...action) {
     return {
         type: ACTION_TYPE,
@@ -199,27 +272,14 @@ function mapAction (...action) {
     }
 }
 
-// TODO: builder middleware API
-// createMiddleware((t) => t
-// .namespace("counter")
-// .on("foo", __, "bar", __, (state, fooArg, barArg) => t
-// .continue() // pass action unaltered
-// .next("foo", fooArg, "bar", barArg, "withFlag", "flag"))
-// .dispatch("foo", 3, "bar", 4)
-// .dispatchRaw({ type: "foo" })
-// )
-// )
-
-function createBuilderMiddleware () {
-    return (store) => (next) => (action) => {
-        if (Array.isArray(action)) {
-            return next({
-                type: ACTION_TYPE,
-                payload: action
-            })
-        } else {
-            return next(action)
-        }
+const builderActionMiddleware = (store) => (next) => (action) => {
+    if (Array.isArray(action)) {
+        return next({
+            type: ACTION_TYPE,
+            payload: action
+        })
+    } else {
+        return next(action)
     }
 }
 
@@ -227,4 +287,4 @@ function nullUpdater () {
     throw new Error("Updater functions (.set, .update) can only be called in handlers")
 }
 
-module.exports = { createHandler, createBuilderMiddleware, mapAction }
+module.exports = { createHandler, createMiddleware, builderActionMiddleware, mapAction }
