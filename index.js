@@ -1,7 +1,3 @@
-function nullUpdater () {
-    throw new Error("Updater functions (.set, .update) can only be called in handlers")
-}
-
 const ACTION_TYPE = "__redux_builder"
 
 class Handler {
@@ -80,6 +76,11 @@ class Handler {
         this._after = this._after.concat(this._mapHookUpdaters(updaters))
         return this
     }
+    otherwise (handler) {
+        if (this._otherwise) { throw new Error(".otherwise can only be called once per handler") }
+        this._otherwise = handler
+        return this
+    }
 
     // helpers
     _mapHookUpdaters (updaters) {
@@ -113,12 +114,15 @@ class Handler {
         let nextState = state
         this._updater = (fn) => { nextState = fn(nextState, action) }
 
+        let handled = false
         for (const matcher of this._matchers) {
             if (this._matchPattern(matcher.pattern, action, state)) {
                 for (const handler of matcher.handlers) { handler(action) }
+                handled = true
                 break
             }
         }
+        if (!handled && this._otherwise) { this._otherwise(action) }
 
         this._updater = nullUpdater
         return nextState
@@ -211,6 +215,10 @@ function createBuilderMiddleware () {
             return next(action)
         }
     }
+}
+
+function nullUpdater () {
+    throw new Error("Updater functions (.set, .update) can only be called in handlers")
 }
 
 module.exports = { createHandler, createBuilderMiddleware, mapAction }
