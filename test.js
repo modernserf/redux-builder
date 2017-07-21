@@ -14,14 +14,14 @@ test("smoke test", (t) => {
 test("basic action handling", (t) => {
     let state = { count: 0 }
 
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .on("increment", () => b
             .set("count", ({ count }) => count + 1))
         .on("decrement", () => b
             .set("count", ({ count }) => count - 1)))
 
-    state = reducer(undefined, { type: "@init" })
-    t.deepEquals(state, { count: 0 })
+    // state = reducer(undefined, { type: "@init" })
+    // t.deepEquals(state, { count: 0 })
     state = reducer(state, mapAction("increment"))
     t.deepEquals(state, { count: 1 })
 
@@ -31,10 +31,38 @@ test("basic action handling", (t) => {
     t.end()
 })
 
+test(".initState", (t) => {
+    let state = { count: 0 }
+
+    const reducer = createHandler((b) => b
+        .initState(state)
+        .on("increment", () => b
+            .set("count", ({ count }) => count + 1)))
+
+    state = reducer(undefined, { type: "@init" })
+    t.deepEquals(state, { count: 0 })
+    state = reducer(state, mapAction("increment"))
+    t.deepEquals(state, { count: 1 })
+    t.end()
+})
+
+test(".initState can only be called once", (t) => {
+    let state = { count: 0 }
+
+    t.throws(() => {
+        createHandler((b) => b
+            .initState(state)
+            .initState(state)
+            .on("increment", () => b
+                .set("count", ({ count }) => count + 1)))
+    })
+    t.end()
+})
+
 test("pattern matching", (t) => {
     let state = { count: 0 }
 
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .on("increment", () => b
             .set("count", ({ count }) => count + 1))
         .on("decrement", () => b
@@ -61,7 +89,7 @@ test("pattern matching", (t) => {
 test("namespace", (t) => {
     let state = { count: 0 }
 
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .namespace("counter")
         .on("increment", () => b
             .set("count", ({ count }) => count + 1))
@@ -80,7 +108,7 @@ test("setters", (t) => {
         foo: 0,
         bar: 0
     }
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .setter("foo", "bar"))
 
     state = reducer(state, mapAction("foo", 12))
@@ -98,7 +126,7 @@ test("hooks", (t) => {
     }
 
     const incrementCounter = (b) => b.set("count", ({ count }) => count + 1)
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .beforeEach(incrementCounter)
         .setter("foo", "bar"))
 
@@ -116,7 +144,7 @@ test("merge acts like setState", (t) => {
     }
     let addToAll = ({ foo, bar }, value) => ({ foo: foo + value, bar: bar + value })
 
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .on("addToAll", Number, (value) => b
             .merge(addToAll, value))
         .on("increment", String, (key) => b
@@ -141,7 +169,7 @@ test("patterns match in order, matchers use state", (t) => {
         return nextState
     }
 
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .on("increment", "all", (value) => b
             .merge(incAll))
         .on("increment", (key, state) => key in state, (key) => b
@@ -163,7 +191,7 @@ test("method_missing-style matching with .otherwise", (t) => {
         log: [],
         count: 0
     }
-    const reducer = createHandler(state, (b) => b
+    const reducer = createHandler((b) => b
         .on("increment", () => b
             .set("count", ({ count }) => count + 1))
         .otherwise((action) => b
@@ -185,12 +213,8 @@ test("method_missing-style matching with .otherwise", (t) => {
 })
 
 test(".otherwise can only be called once", (t) => {
-    let state = {
-        log: [],
-        count: 0
-    }
     t.throws(() => {
-        createHandler(state, (b) => b
+        createHandler((b) => b
             .on("increment", () => b
                 .set("count", ({ count }) => count + 1))
             .otherwise((action) => b

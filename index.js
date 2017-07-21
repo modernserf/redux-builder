@@ -39,6 +39,12 @@ class Handler {
         return this
     }
 
+    initState (state) {
+        if (this._initState) { throw new Error(".initState can only be called once per handler") }
+        this._initState = state
+        return this
+    }
+
     namespace (...args) {
         if (args.length === 1 && typeof args === "function") {
             this._namespace = args[0](this._namespace)
@@ -110,7 +116,7 @@ class Handler {
         }
     }
 
-    run (state, action) {
+    run (state = this._initState, action) {
         let nextState = state
         this._updater = (fn) => { nextState = fn(nextState, action) }
 
@@ -181,9 +187,9 @@ function match (matcher, value, state) {
     }
 }
 
-function createHandler (initState, cb) {
+function createHandler (cb) {
     const handler = new Handler(cb)
-    return (state = initState, action) => handler.run(state, action)
+    return (state, action) => handler.run(state, action)
 }
 
 function mapAction (...action) {
