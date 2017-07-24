@@ -41,11 +41,17 @@ see `test.js` for more examples.
 
 ## TODO
 
+```js
 .select(...selectorPattern,(state, ...pattern) => selection)
+```
 
 like combineReducers + delegates selection
+```js
 .children({ ...childReducers })
+```
 
-// what does this do when it failslets ? return initState? return prevState? throw error?
+what does this do when it failslets ? return initState? return prevState? throw error?
+```js
 .validate({ field: String, direction: t.oneOf(1, -1) })
-    
+```
+
