@@ -1,16 +1,6 @@
 const test = require("tape")
 const { createHandler, mapAction } = require("./index")
 
-// function setup (initState, builder) {
-//     const handler = createHandler(initState, builder)
-//     return createStore(handler, applyMiddleware(createBuilderMiddleware()))
-// }
-
-test("smoke test", (t) => {
-    t.ok(true)
-    t.end()
-})
-
 test("basic action handling", (t) => {
     let state = { count: 0 }
 
@@ -20,8 +10,6 @@ test("basic action handling", (t) => {
         .on("decrement", () => b
             .set("count", ({ count }) => count - 1)))
 
-    // state = reducer(undefined, { type: "@init" })
-    // t.deepEquals(state, { count: 0 })
     state = reducer(state, mapAction("increment"))
     t.deepEquals(state, { count: 1 })
 
@@ -222,5 +210,42 @@ test(".otherwise can only be called once", (t) => {
             .otherwise((action) => b
                 .set("log", ({ log }) => log.concat([action]))))
     })
+    t.end()
+})
+
+test("match regular actions", (t) => {
+    let state = { count: 0 }
+    const reducer = createHandler((b) => b
+        .on({ type: "increment" }, () => b
+            .set("count", ({ count }) => count + 1))
+        .on({ type: "add", payload: Number }, ({ payload }) => b
+            .set("count", ({ count }) => count + payload)))
+
+    state = reducer(state, { type: "increment" })
+    t.deepEquals(state, { count: 1 })
+
+    state = reducer(state, { type: "add", payload: 3 })
+    t.deepEquals(state, { count: 4 })
+    t.end()
+})
+
+test("onState", (t) => {
+    let state = "LOCKED"
+    const reducer = createHandler((b) => b
+        .onState("LOCKED", "addToken", () => b
+            .update(() => "OPEN"))
+        .onState("OPEN", "turnTurnstile", () => b
+            .update(() => "LOCKED")))
+
+    state = reducer(state, mapAction("addToken"))
+    t.equals(state, "OPEN")
+    state = reducer(state, mapAction("addToken"))
+    t.equals(state, "OPEN")
+    state = reducer(state, mapAction("turnTurnstile"))
+    t.equals(state, "LOCKED")
+
+    state = reducer("FOO", mapAction("addToken"))
+    t.equals(state, "FOO")
+
     t.end()
 })

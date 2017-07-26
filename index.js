@@ -46,6 +46,20 @@ class Base {
         })
         return this
     }
+    onState (matchState, ...args) {
+        const updater = args.pop()
+        const pattern = [...this._namespace, ...args]
+        this._matchers.push({
+            pattern,
+            matchState,
+            handlers: [
+                ...this._before,
+                (action) => updater(...this._spreadArguments(pattern, action)),
+                ...this._after
+            ]
+        })
+        return this
+    }
     beforeEach (...updaters) {
         this._before = this._before.concat(this._mapHookUpdaters(updaters))
         return this
@@ -73,27 +87,21 @@ class Base {
             return [action]
         }
     }
-    _matchPattern (pattern, action, state) {
+    _matchPattern (matcher, action, state) {
+        const { pattern, matchState } = matcher
+        if (matchState && !match(matchState, state)) { return false }
+
         // made by redux builder middleware
         if (action.type === ACTION_TYPE) {
             return pattern.every((matcher, i) => match(matcher, action.payload[i], state))
         // "regular" action with type field
-        } else if (pattern.length === 2) {
-            return pattern[0] === action.type && match(pattern[1], action, state)
-        // regular action without payload
-        } else if (pattern.length === 1) {
-            return pattern[0] === action.type
         } else {
-            return false
+            return match(pattern[0], action, state)
         }
     }
 }
 
 class Handler extends Base {
-    constructor (builder) {
-        super()
-        builder(this)
-    }
     // state updating functions
     // TODO: batch sets into a single operation
     set (key, value) {
@@ -128,7 +136,7 @@ class Handler extends Base {
 
         let handled = false
         for (const matcher of this._matchers) {
-            if (this._matchPattern(matcher.pattern, action, state)) {
+            if (this._matchPattern(matcher, action, state)) {
                 for (const handler of matcher.handlers) { handler(action) }
                 handled = true
                 break
@@ -153,11 +161,6 @@ class Handler extends Base {
 // )
 
 class Middleware extends Base {
-    constructor (builder) {
-        super()
-        builder(this)
-    }
-
     // pass action unaltered
     continue () {
         this._updater((_, next, action) => next(action))
@@ -256,12 +259,14 @@ function match (matcher, value, state) {
 }
 
 function createHandler (cb) {
-    const handler = new Handler(cb)
+    const handler = new Handler()
+    cb(handler)
     return (state, action) => handler.run(state, action)
 }
 
 function createMiddleware (cb) {
-    const middleware = new Middleware(cb)
+    const middleware = new Middleware()
+    cb(middleware)
     return (store) => (next) => (action) => middleware.run(store, next, action)
 }
 
