@@ -54,3 +54,29 @@ what does this do when it fails ? return initState? return prevState? throw erro
 ```js
 .validate({ field: String, direction: t.oneOf(1, -1) })
 ```
+
+More metaprogramming!
+
+```js
+// call itself
+.do(t,...action)
+// delegate to another reducer
+.do(handler, ...action)
+```
+
+override `set` / `merge` behavior (e.g. for iMap)
+how would this work with inheritance?
+maybe this should be done in JS instead of DSL
+```js
+.on(t, "set", _, _, (key, value) => t
+    .update((state) => state.set(key, value))
+)
+
+// or
+
+class IMapHandler extends Handler {
+    set (key, value) {
+        this.update((state) => state.set(key, value))
+    }
+}
+```
