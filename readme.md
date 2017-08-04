@@ -51,6 +51,7 @@ like combineReducers + delegates select
 ```
 
 what does this do when it fails ? return initState? return prevState? throw error?
+push errors into an error state fragment?
 ```js
 .validate({ field: String, direction: t.oneOf(1, -1) })
 ```
@@ -80,3 +81,9 @@ class IMapHandler extends Handler {
     }
 }
 ```
+
+reducers are handler + data structures
+"value" is just update (prev) => next
+"record" (object) is set at key, merge, update
+"map" is map (val, key) => val, mapWhere (key) => ?, (val) => val, add, remove, merge, update
+etc.

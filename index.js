@@ -104,6 +104,7 @@ class Base {
 class Handler extends Base {
     // state updating functions
     // TODO: batch sets into a single operation
+    // TODO: keys path? set("foo", "bar", "baz", getValue)
     set (key, value) {
         this._updater((state) => Object.assign({}, state, { [key]: value(state) }))
         return this
